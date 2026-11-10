@@ -1,0 +1,19 @@
+{
+  "name": "mukhattati-dev",
+  "private": true,
+  "description": "أدوات تطوير واختبار فقط — التطبيق نفسه static من غير build",
+  "type": "module",
+  "scripts": {
+    "serve": "node scripts/serve.mjs",
+    "test:unit": "node tests/unit.mjs",
+    "test:e2e": "node tests/e2e.js",
+    "check": "node scripts/check-shared.mjs"
+  },
+  "devDependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "adhan": "^4.4.3",
+    "ffmpeg-static": "^5.2.0",
+    "ffprobe-static": "^3.1.0",
+    "playwright": "^1.48.0"
+  }
+}
