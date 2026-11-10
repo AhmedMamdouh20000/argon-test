@@ -1,4 +1,4 @@
-// نقطة الدخول الرئيسية للتطبيق (app.js)
+// نقطة الدخول الرئيسية للتطبيق (app.js) — مع دعم السحب (Swipe) والانزلاق السلس بين التابات
 import { html, render } from './core/util.js';
 import { store } from './core/store.js';
 import { checkAuthAndSync, syncNow } from './core/cloud.js';
@@ -20,16 +20,85 @@ const TABS = [
 ];
 
 let activeTab = 'today';
+let slideDirection = ''; // 'slide-from-left' | 'slide-from-right' | ''
+let swipeBound = false;
 
 export function setTab(tabId) {
-  if (!TABS.some((t) => t.id === tabId)) return;
+  const curIdx = TABS.findIndex((t) => t.id === activeTab);
+  const nextIdx = TABS.findIndex((t) => t.id === tabId);
+  if (nextIdx === -1 || nextIdx === curIdx) return;
+
+  // في RTL: التاب التالي (index أكبر) يقع على اليسار فالشاشة الجديدة تدخل من اليسار، والتاب السابق يدخل من اليمين
+  slideDirection = nextIdx > curIdx ? 'slide-from-left' : 'slide-from-right';
   activeTab = tabId;
   renderApp();
+}
+
+function bindSwipeNavigation(rootEl) {
+  if (swipeBound || !rootEl) return;
+  swipeBound = true;
+
+  let startX = 0;
+  let startY = 0;
+  let tracking = false;
+
+  const isInteractiveIgnore = (target) => {
+    if (!target || typeof target.closest !== 'function') return false;
+    return Boolean(
+      target.closest('input, textarea, select, [type="range"], dialog[open], .date-strip')
+    );
+  };
+
+  rootEl.addEventListener(
+    'touchstart',
+    (e) => {
+      if (!store.state.onboarded) return;
+      if (e.touches.length !== 1 || isInteractiveIgnore(e.target)) {
+        tracking = false;
+        return;
+      }
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      tracking = true;
+    },
+    { passive: true }
+  );
+
+  rootEl.addEventListener(
+    'touchend',
+    (e) => {
+      if (!tracking || !store.state.onboarded) return;
+      tracking = false;
+      const touch = e.changedTouches?.[0];
+      if (!touch) return;
+
+      const dx = touch.clientX - startX;
+      const dy = touch.clientY - startY;
+
+      // التأكد إن السحبة أفقية واضحة (أكبر من 55px وأكبر من ضعف الحركة الرأسية عشان متتعارضش مع السكرول)
+      if (Math.abs(dx) < 55 || Math.abs(dx) < Math.abs(dy) * 1.4) return;
+
+      const curIdx = TABS.findIndex((t) => t.id === activeTab);
+      if (curIdx === -1) return;
+
+      // في واجهة عربية RTL (اليوم في أقصى اليمين والمزيد في أقصى اليسار):
+      // السحب لليمين (dx > 0) يسحب التاب اللي على اليسار (التالي: curIdx + 1)
+      // السحب لليسار (dx < 0) يرجع للتاب اللي على اليمين (السابق: curIdx - 1)
+      if (dx > 0 && curIdx < TABS.length - 1) {
+        setTab(TABS[curIdx + 1].id);
+      } else if (dx < 0 && curIdx > 0) {
+        setTab(TABS[curIdx - 1].id);
+      }
+    },
+    { passive: true }
+  );
 }
 
 export function renderApp() {
   const rootEl = document.getElementById('app');
   if (!rootEl) return;
+
+  bindSwipeNavigation(rootEl);
 
   const mainSetting = store.getRecord('setting', 'main') || {};
   applyTheme(mainSetting.theme || 'light');
@@ -43,6 +112,8 @@ export function renderApp() {
   }
 
   const isDark = (mainSetting.theme || 'light') === 'dark';
+  const animClass = slideDirection;
+  slideDirection = '';
 
   render(
     rootEl,
@@ -103,19 +174,18 @@ export function renderApp() {
             </button>
           </header>
 
-          <main id="tab-view" class="tab-view"></main>
+          <main id="tab-view" class="tab-view ${animClass}"></main>
         </div>
       </div>
     `
   );
 
-  // ربط أزرار التنقل
+  // ربط أزرار التنقل مع حركة الانزلاق (Slide)
   rootEl.querySelectorAll('.nav-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
       const tab = btn.dataset.tab;
       if (tab && tab !== activeTab) {
-        activeTab = tab;
-        renderApp();
+        setTab(tab);
       }
     });
   });

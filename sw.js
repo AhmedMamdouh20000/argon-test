@@ -1,5 +1,5 @@
 // Service Worker لتطبيق «مُخطّطي» — Cache-first للأصول الثابتة مع استثناء طلبات Supabase
-const CACHE_NAME = 'mk-v3.1.0';
+const CACHE_NAME = 'mk-v3.2.0';
 
 const STATIC_ASSETS = [
   './',

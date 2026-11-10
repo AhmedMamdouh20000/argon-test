@@ -171,6 +171,42 @@ button, input, select, textarea {
   max-width: 1440px;
   margin: 0 auto;
   padding: 14px 16px 92px;
+  overflow-x: hidden;
+  touch-action: pan-y;
+}
+
+.tab-view {
+  will-change: transform, opacity;
+}
+
+.tab-view.slide-from-left {
+  animation: tabSlideFromLeft 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.tab-view.slide-from-right {
+  animation: tabSlideFromRight 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes tabSlideFromLeft {
+  from {
+    opacity: 0.25;
+    transform: translateX(-42px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes tabSlideFromRight {
+  from {
+    opacity: 0.25;
+    transform: translateX(42px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .mobile-topbar {
@@ -872,6 +908,22 @@ button, input, select, textarea {
   background: var(--lamp);
   color: #0F272B;
   border-color: var(--lamp);
+}
+
+.btn-sm.active-rose {
+  background: var(--rose);
+  color: #fff;
+  border-color: var(--rose);
+}
+
+.chip-dot.ok-dot {
+  background: var(--ok);
+}
+
+.prayer-day-strip {
+  margin-bottom: 12px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
 }
 
 .btn-icon {

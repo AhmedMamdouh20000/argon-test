@@ -1,21 +1,17 @@
-// سكريبت تصوير وإنتاج فيديو الديمو (2560×1440 @ 60fps — Deterministic Frame Stepping + Audio Mix)
+// سكريبت تصوير فيديو الديمو المتزامن بالمللي ثانية مع ملف الصوت المرفوع (2560×1440 @ 60fps)
 import fs from 'node:fs/promises';
-import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { chromium } from 'playwright';
-import ffmpegPath from 'ffmpeg-static';
-import ffprobeStatic from 'ffprobe-static';
 import { routeLocal } from './serve.mjs';
 
-const ffprobePath = ffprobeStatic.path;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
 const WORK_DIR = path.join(ROOT, 'demo_work');
 const FRAMES_DIR = path.join(WORK_DIR, 'frames');
 const AUDIO_DIR = path.join(WORK_DIR, 'audio');
-const FINAL_MP4 = path.join(ROOT, 'mukhattati-demo.mp4');
+const PYTHON_EXE = 'C:\\Users\\Mobi lap\\AppData\\Local\\Programs\\Python\\Python313\\python.exe';
 
 await fs.rm(FRAMES_DIR, { recursive: true, force: true });
 await fs.mkdir(FRAMES_DIR, { recursive: true });
@@ -26,12 +22,12 @@ const audioDurMap = Object.fromEntries(audioMeta.map((m) => [m.id, Number(m.dura
 
 const BASE_URL = 'http://localhost:8123';
 
-console.log('🎬 بدء تصوير فيديو الديمو فريم بفريم (Deterministic 2560×1440 @ 60fps)...');
+console.log('🎬 بدء تصوير فيديو الديمو المتزامن مع الصوت المرفوع (2560×1440 @ 60fps)...');
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({
   viewport: { width: 1280, height: 720 },
-  deviceScaleFactor: 2, // ينتج 2560×1440 بالظبط
+  deviceScaleFactor: 2, // 2560×1440
   locale: 'ar-EG',
   timezoneId: 'Africa/Cairo'
 });
@@ -39,7 +35,7 @@ const context = await browser.newContext({
 await routeLocal(context, BASE_URL);
 const page = await context.newPage();
 
-// تثبيت الساعة المزيفة على الساعة 11:25 صباحاً يوم 2026-11-10 (قبل صلاة الظهر 11:39)
+// تثبيت الساعة قبل صلاة الظهر بدقائق (11:25 صباحاً يوم 2026-11-10)
 const initialTime = new Date('2026-11-10T11:25:00+02:00');
 await page.clock.install({ time: initialTime });
 await page.clock.pauseAt(initialTime);
@@ -58,7 +54,6 @@ await page.evaluate(() => {
       pointer-events: none;
       overflow: visible;
     }
-    /* الفخ المهم في البند 10.4: إخفاء البوب-أوفر عند إغلاقه حتى مع وجود display:grid أو flex */
     #__title:not(:popover-open),
     #__cap:not(:popover-open),
     #__cur:not(:popover-open),
@@ -80,7 +75,6 @@ await page.evaluate(() => {
     }
     .__title-inner {
       text-align: center;
-      transform: translateY(0) scale(1);
     }
     .__title-badge {
       width: 86px;
@@ -263,7 +257,6 @@ await page.evaluate(() => {
     window.__demoState.rippleAge = 0;
   };
 
-  // البند 10.3: دالة __frame(dt, x, y) للتحكم اليدوي في الـ Web Animations مع استثناء pseudo-elements اللي اسمها فيه group
   window.__frame = (dtMs, x, y) => {
     if (typeof x === 'number' && typeof y === 'number') {
       window.__demoState.x = x;
@@ -290,7 +283,7 @@ await page.evaluate(() => {
     const unique = new Set(anims);
     for (const anim of unique) {
       const pseudo = anim.effect?.pseudoElement || '';
-      if (pseudo.includes('group')) continue; // استثناء ::view-transition-group كما في البند 10.3
+      if (pseudo.includes('group')) continue;
       try {
         if (anim.playState === 'running') {
           anim.pause();
@@ -333,8 +326,7 @@ async function captureStep(dtSec) {
   virtualElapsedSec += dtSec;
 }
 
-// التحرك السلس للمؤشر بمعدل 60fps
-async function moveCursorTo(targetX, targetY, durationSec = 0.55) {
+async function moveCursorTo(targetX, targetY, durationSec = 0.5) {
   const steps = Math.max(1, Math.round(durationSec * 60));
   const dt = 1 / 60;
   const startX = curPos.x;
@@ -342,7 +334,6 @@ async function moveCursorTo(targetX, targetY, durationSec = 0.55) {
 
   for (let i = 1; i <= steps; i++) {
     const t = i / steps;
-    // easeInOutCubic
     const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
     curPos.x = Math.round((startX + (targetX - startX) * ease) * 10) / 10;
     curPos.y = Math.round((startY + (targetY - startY) * ease) * 10) / 10;
@@ -350,7 +341,7 @@ async function moveCursorTo(targetX, targetY, durationSec = 0.55) {
   }
 }
 
-async function moveToSelector(selector, durationSec = 0.55) {
+async function moveToSelector(selector, durationSec = 0.5) {
   const box = await page.locator(selector).first().boundingBox();
   if (!box) return curPos;
   const tx = box.x + box.width / 2;
@@ -359,36 +350,33 @@ async function moveToSelector(selector, durationSec = 0.55) {
   return { x: tx, y: ty };
 }
 
-async function clickSelector(selector, { moveSec = 0.5, afterRipSec = 0.45 } = {}) {
+async function clickSelector(selector, { moveSec = 0.45, afterRipSec = 0.42 } = {}) {
   const pt = await moveToSelector(selector, moveSec);
   await page.evaluate(({ x, y }) => window.__triggerRipple(x, y), pt);
   await page.locator(selector).first().click();
   await page.evaluate(() => window.__ensureDemoPopoversTop());
-  // تصوير موجات الضغطة بـ 60fps
   const steps = Math.max(1, Math.round(afterRipSec * 60));
   for (let i = 0; i < steps; i++) {
     await captureStep(1 / 60);
   }
 }
 
-async function typeIntoSelector(selector, text, { charSec = 0.05 } = {}) {
-  await clickSelector(selector, { moveSec: 0.45, afterRipSec: 0.25 });
+async function typeIntoSelector(selector, text, { framesPerChar = 2 } = {}) {
+  await clickSelector(selector, { moveSec: 0.4, afterRipSec: 0.22 });
   const chars = [...text];
   let current = '';
   for (const ch of chars) {
     current += ch;
     await page.locator(selector).first().fill(current);
-    // 3 فريمات بـ 60fps لكل حرف (0.05s)
-    for (let f = 0; f < 3; f++) {
+    for (let f = 0; f < framesPerChar; f++) {
       await captureStep(1 / 60);
     }
   }
 }
 
-// انتظار ثابت بمعدل ~12fps لتوفير المساحة والوقت مع الحفاظ على التوقيت الدقيق
 async function holdFor(seconds) {
   if (seconds <= 0.01) return;
-  const step = 1 / 12; // ~0.083333s
+  const step = 1 / 12;
   let rem = seconds;
   while (rem > step) {
     await captureStep(step);
@@ -403,13 +391,13 @@ const sceneStartTimes = {};
 
 async function runScene(id, actionFn) {
   const sc = scriptData.scenes.find((s) => s.id === id);
-  const voiceDur = audioDurMap[id] || 7.0;
-  // البند 12: مدة كل مشهد = max(مدة الحركة الفعلية, مدة الجملة + 0.9 ثانية)
+  const voiceDur = audioDurMap[id] || 6.5;
+  // مدة كل مشهد = max(مدة الحركة الفعلية, مدة الجملة + 0.9 ثانية)
   const minSceneDur = voiceDur + 0.9;
   const startSec = virtualElapsedSec;
   sceneStartTimes[id] = startSec;
 
-  console.log(`🎥 تصوير مشهد ${id} (${sc.cap}) — مدة الصوت ${voiceDur.toFixed(2)}s...`);
+  console.log(`🎥 تصوير مشهد ${id} (${sc.cap}) — مدة الجملة في صوتك ${voiceDur.toFixed(2)}s...`);
   await page.evaluate((cap) => window.__setCaption(cap), sc.cap);
 
   await actionFn();
@@ -421,10 +409,11 @@ async function runScene(id, actionFn) {
 }
 
 // ============================================================================
-// تسلسل المشاهد (المقدمة + s1..s12 + الخاتمة)
+// تسلسل المشاهد مضبوط بالمللي ثانية مع كلامك في الصوت المرفوع
+// (لاحظ أن الصوت في كل مشهد يبدأ عند +0.3s من بداية المشهد)
 // ============================================================================
 
-// 0) المقدمة (5 ثواني)
+// 0) المقدمة (5.0 ثواني)
 console.log('🎥 تصوير بطاقة المقدمة (5.0s)...');
 await page.evaluate(() => {
   window.__setCaption('');
@@ -434,65 +423,100 @@ await moveCursorTo(640, 540, 0.6);
 await holdFor(4.4);
 await page.evaluate(() => window.__setTitleCard(false));
 
-// s1: فتح التطبيق لأول مرة
+// s1 (6.72s): "أهلا بيك. ده مخطّطي، مخطّط يومي بالعربي، فيه المهام والصلاة والفلوس. تعالى نجرّبه سوا."
 await runScene('s1', async () => {
-  await typeIntoSelector('#ob-name', 'أحمد');
-  await moveToSelector('#btn-ob-cloud', 0.6);
-  await holdFor(1.2);
-  await moveToSelector('#btn-ob-local', 0.6);
-});
-
-// s2: اختيار مكان التخزين
-await runScene('s2', async () => {
-  await moveToSelector('#btn-ob-cloud', 0.55);
-  await holdFor(1.0);
-  await clickSelector('#btn-ob-local', { moveSec: 0.6, afterRipSec: 0.5 });
-});
-
-// s3: قوس اليوم ومواقيت الصلاة
-await runScene('s3', async () => {
-  await moveToSelector('.arc-svg', 0.65);
-  await holdFor(1.5);
-  await moveToSelector('#hero-countdown', 0.6);
-});
-
-// s4: إضافة مهمة بجملة عادية («مذاكرة الساعة 11:50»)
-await runScene('s4', async () => {
-  await typeIntoSelector('#quick-input', 'مذاكرة الساعة 11:50');
   await holdFor(0.8);
+  await moveToSelector('.onboarding-brand .ruqaa-title', 0.6);
+  await holdFor(1.2);
+  await typeIntoSelector('#ob-name', 'أحمد', { framesPerChar: 3 });
+  await holdFor(1.5);
+});
+
+// s2 (6.77s): "أول ما تفتح، بتختار تحفظ بياناتك على جهازك بس (1.5s)، أو تسجّل بجوجل وتتزامن بين كل أجهزتك (3.3s). هنختار الجهاز (5.4s)."
+await runScene('s2', async () => {
+  await holdFor(1.2);
+  // يشاور على "على جهازي بس" لما تقول "تحفظ بياناتك على جهازك بس"
+  await moveToSelector('#btn-ob-local', 0.6);
+  await holdFor(1.2);
+  // يشاور على "سجّل بجوجل" لما تقول "أو تسجل بجوجل وتتزامن بين كل أجهزتك"
+  await moveToSelector('#btn-ob-cloud', 0.6);
+  await holdFor(1.6);
+  // يضغط على "على جهازي بس" بالظبط لما تقول "هنختار الجهاز" (~5.2s)
+  await clickSelector('#btn-ob-local', { moveSec: 0.55, afterRipSec: 0.5 });
+});
+
+// s3 (7.82s): "ده قوس اليوم (0.4s). الشمس بتتحرك بين الصلوات الخمس (1.8s)، والسما بتتغيّر من الفجر للعشا (3.8s)، وتحتيها عدّ تنازلي للصلاة الجاية (5.8s)."
+await runScene('s3', async () => {
+  await holdFor(0.6);
+  await moveToSelector('.arc-sun', 0.7);
+  await holdFor(1.5);
+  await moveToSelector('.arc-svg', 0.7);
+  await holdFor(1.8);
+  // ينزل للعد التنازلي بالظبط لما تقول "وتحتيها عد تنازلي للصلاة الجاية"
+  await moveToSelector('#hero-countdown', 0.65);
+});
+
+// s4 (7.22s): "عشان تضيف مهمة، اكتبها بجملة عادية (0.4s). هنكتب: مذاكرة الساعة 11:50 (2.3s). والتطبيق بيفهم الوقت لوحده (5.4s)."
+await runScene('s4', async () => {
+  await holdFor(1.8);
+  // يبدأ يكتب "مذاكرة الساعة 11:50" بالظبط لما تقول "هنكتب: مذاكرة الساعة 11:50"
+  await typeIntoSelector('#quick-input', 'مذاكرة الساعة 11:50', { framesPerChar: 3 });
+  // يوري المعاينة الذكية تحت الحقل لما تقول "والتطبيق بيفهم الوقت لوحده"
+  await moveToSelector('#quick-preview', 0.45);
+  await holdFor(1.0);
   await clickSelector('#quick-submit', { moveSec: 0.45, afterRipSec: 0.45 });
 });
 
-// s5: تاريخ تلقائي (بكرة) («اجتماع بكرة 5 مساءً»)
+// s5 (3.97s): "وكمان هنكتب: اجتماع بكرة 5 مساءً (0.5s)، فبيروح لبكرة تلقائيًا (2.6s)."
 await runScene('s5', async () => {
-  await typeIntoSelector('#quick-input', 'اجتماع بكرة 5 مساءً');
-  await holdFor(0.7);
-  await clickSelector('#quick-submit', { moveSec: 0.45, afterRipSec: 0.45 });
+  await holdFor(0.35);
+  await typeIntoSelector('#quick-input', 'اجتماع بكرة 5 مساءً', { framesPerChar: 2 });
+  await holdFor(0.4);
+  await clickSelector('#quick-submit', { moveSec: 0.4, afterRipSec: 0.4 });
+  // يشاور على يوم "بكرة" في شريط التواريخ اللي نورت تحته نقطة المهام!
+  await moveToSelector('.date-chip:nth-child(3)', 0.45);
 });
 
-// s6: تعليم المهمة كمنجزة
+// s6 (4.77s): "علّم المهمة إنها تمّت (0.4s)، وشوف دايرة الإنجاز وهي بتتحرك (1.8s)، والنسبة اللي خلّصتها والباقي (3.3s)."
 await runScene('s6', async () => {
-  await clickSelector('[data-action="toggle-done"]', { moveSec: 0.55, afterRipSec: 0.6 });
-  await moveToSelector('.progress-ring-box', 0.6);
+  await holdFor(0.5);
+  // يضغط على علامة صح جنب المهمة لما تقول "علّم المهمة إنها تمت"
+  await clickSelector('[data-action="toggle-done"]', { moveSec: 0.5, afterRipSec: 0.55 });
+  // يتحرك لدايرة الإنجاز لما تقول "وشوف دايرة الإنجاز وهي بتتحرك"
+  await moveToSelector('.progress-ring-box', 0.55);
+  await holdFor(0.9);
+  // يتحرك للعدادات لما تقول "والنسبة اللي خلصتها والباقي"
+  await moveToSelector('.stat-pills', 0.5);
 });
 
-// s7: تنبيه قبل الميعاد بربع ساعة
+// s7 (5.12s): "قبل المهمة بربع ساعة، بيطلعلك منبّه يفكّرك (0.4s). وتقدر تأجّلها (3.1s) أو تعلّمها تمّت (4.1s)."
 await runScene('s7', async () => {
-  // نرجع المهمة لـ pending عشان يظهر لها منبه ربع ساعة، ونقدم الساعة لـ 11:35 (قبل 11:50 بـ 15 دقيقة)
-  await clickSelector('[data-action="toggle-done"]', { moveSec: 0.4, afterRipSec: 0.35 });
+  // نرجع المهمة pending ونقدم الساعة لـ 11:35 (قبل 11:50 بربع ساعة بالظبط) فيظهر المنبه فوراً
+  await page.evaluate(() => {
+    const tasks = JSON.parse(localStorage.getItem('mk3')).records.task;
+    for (const k of Object.keys(tasks)) {
+      if (tasks[k].d.time === '11:50') tasks[k].d.status = 'pending';
+    }
+    localStorage.setItem('mk3', JSON.stringify(JSON.parse(localStorage.getItem('mk3'))));
+  });
+  await clickSelector('[data-action="toggle-done"]', { moveSec: 0.25, afterRipSec: 0.15 });
   const alertTime = new Date('2026-11-10T11:35:05+02:00');
   await page.clock.setFixedTime(alertTime);
   await page.evaluate(() => {
     window.__runChecksNow(new Date('2026-11-10T11:35:05+02:00'));
     window.__ensureDemoPopoversTop();
   });
-  await holdFor(1.6);
-  await clickSelector('#al-btn-done', { moveSec: 0.55, afterRipSec: 0.45 });
+  await holdFor(2.1);
+  // يشاور على زرار التأجيل لما تقول "وتقدر تأجلها"
+  await moveToSelector('#al-btn-snooze', 0.5);
+  await holdFor(0.5);
+  // يضغط على "تمت ✓" لما تقول "أو تعلمها تمت"
+  await clickSelector('#al-btn-done', { moveSec: 0.45, afterRipSec: 0.45 });
 });
 
-// s8: الأذان وحوار الصلاة الإجباري
+// s8 (7.22s): "ولما يحين وقت الصلاة، بيشتغل الأذان ويظهر حوار لازم تجاوب عليه (0.4s). مفيش اختصار (4.1s). لازم تختار: والله صلّيت (5.1s)، أو والله هصلّي (6.2s)."
 await runScene('s8', async () => {
-  // تقديم الساعة لوقت أذان الظهر في القاهرة (11:39)
+  // تقديم الساعة لوقت أذان الظهر 11:39 فيظهر الحوار الإجباري ويشتغل الأذان
   const dhuhrTime = new Date('2026-11-10T11:39:05+02:00');
   await page.clock.setFixedTime(dhuhrTime);
   await page.evaluate(() => {
@@ -500,42 +524,56 @@ await runScene('s8', async () => {
     window.__ensureDemoPopoversTop();
   });
   await moveToSelector('#prayer-modal .modal-title', 0.6);
-  await holdFor(4.0);
-  await clickSelector('#btn-prayer-prayed', { moveSec: 0.6, afterRipSec: 0.5 });
+  await holdFor(3.8);
+  // يشاور على "والله صليت" عند ثانية 5.0
+  await moveToSelector('#btn-prayer-prayed', 0.5);
+  await holdFor(0.5);
+  // يشاور على "والله هصلي" عند ثانية 6.0 ثم يختار "والله صليت"
+  await moveToSelector('#btn-prayer-promised', 0.45);
+  await holdFor(0.35);
+  await clickSelector('#btn-prayer-prayed', { moveSec: 0.45, afterRipSec: 0.45 });
 });
 
-// s9: الميزانية
+// s9 (7.52s): "في تبويب الفلوس (0.4s)، اكتب مرتبك ومواصلاتك اليومية (1.4s)، وضيف احتياجاتك الشهرية (3.2s)، والتطبيق يحسب تصرف كام في اليوم (4.8s). والادخار اختياري (6.4s)."
 await runScene('s9', async () => {
-  await clickSelector('#nav-money', { moveSec: 0.55, afterRipSec: 0.45 });
-  await typeIntoSelector('#inp-salary', '12000');
+  // يفتح تبويب الفلوس أول ما تقول "في تبويب الفلوس"
+  await clickSelector('#nav-money', { moveSec: 0.45, afterRipSec: 0.3 });
+  // يكتب المرتب والمواصلات لما تقول "اكتب مرتبك ومواصلاتك اليومية"
+  await typeIntoSelector('#inp-salary', '12000', { framesPerChar: 2 });
   await page.dispatchEvent('#inp-salary', 'change');
-  await typeIntoSelector('#inp-transport', '50');
+  await typeIntoSelector('#inp-transport', '50', { framesPerChar: 2 });
   await page.dispatchEvent('#inp-transport', 'change');
-  await clickSelector('#chk-save-on', { moveSec: 0.45, afterRipSec: 0.35 });
-  await typeIntoSelector('#need-name', 'إيجار وفواتير');
-  await typeIntoSelector('#need-price', '3200');
-  await clickSelector('#need-submit', { moveSec: 0.45, afterRipSec: 0.45 });
-  await moveToSelector('#daily-spend-val', 0.55);
+  // يضيف الاحتياجات الشهرية لما تقول "وضيف احتياجاتك الشهرية"
+  await typeIntoSelector('#need-name', 'إيجار ونت', { framesPerChar: 2 });
+  await typeIntoSelector('#need-price', '3200', { framesPerChar: 2 });
+  await clickSelector('#need-submit', { moveSec: 0.35, afterRipSec: 0.35 });
+  // يشاور على الصرف اليومي الكبير لما تقول "والتطبيق يحسب تصرف كام في اليوم"
+  await moveToSelector('#daily-spend-val', 0.45);
+  await holdFor(0.5);
+  // يفعّل الادخار الاختياري لما تقول "والادخار اختياري"
+  await clickSelector('#chk-save-on', { moveSec: 0.45, afterRipSec: 0.4 });
 });
 
-// s10: لوحتي وتقرير اليوم
+// s10 (4.17s): "وفي لوحتي (0.4s)، تلاقي تقرير اليوم (1.2s): كام مهمة اتعملت، وكام اتأجّلت (2.4s)."
 await runScene('s10', async () => {
-  await clickSelector('#nav-reports', { moveSec: 0.55, afterRipSec: 0.45 });
-  await moveToSelector('.report-kpi-grid', 0.55);
-  await holdFor(1.2);
-  await moveToSelector('.week-chart', 0.55);
+  await clickSelector('#nav-reports', { moveSec: 0.45, afterRipSec: 0.35 });
+  await moveToSelector('#rep-done', 0.5);
+  await holdFor(0.8);
+  await moveToSelector('#rep-postponed', 0.5);
+  await holdFor(0.8);
+  await moveToSelector('.week-chart', 0.5);
 });
 
-// s11: تبديل الفاتح/الداكن بدايرة (60fps طوال الحركة)
+// s11 (4.77s): "وتقدر تبدّل بين الوضع الفاتح والداكن (0.4s)، بدايرة بتتوسّع من مكان ضغطتك (2.4s)."
 await runScene('s11', async () => {
-  await clickSelector('#nav-today', { moveSec: 0.5, afterRipSec: 0.4 });
-  const pt = await moveToSelector('#btn-theme-toggle', 0.55);
+  await clickSelector('#nav-today', { moveSec: 0.45, afterRipSec: 0.35 });
+  await holdFor(0.8);
+  // يتحرك لزرار الثيم ويضغط عليه بالظبط لما تقول "بدايرة بتتوسع من مكان ضغطتك" (~2.1s)
+  const pt = await moveToSelector('#btn-theme-toggle', 0.5);
   await page.evaluate(({ x, y }) => window.__triggerRipple(x, y), pt);
-  // نطلق الضغطة بدون انتظار انتهاء الـ transition عشان نصور الـ 45 فريم أثناء توسع الدائرة!
   const clickPromise = page.locator('#btn-theme-toggle').first().click();
   await page.waitForTimeout(30);
   await page.evaluate(() => window.__ensureDemoPopoversTop());
-  // تصوير توسع الدائرة بالكامل بـ 60fps (1.0 ثانية = 60 فريم)
   for (let i = 0; i < 60; i++) {
     await captureStep(1 / 60);
   }
@@ -543,10 +581,11 @@ await runScene('s11', async () => {
   await page.evaluate(() => window.__ensureDemoPopoversTop());
 });
 
-// s12: مخطّطي — جرّبه من الرابط
+// s12 (6.43s): "ده مخطّطي (0.4s). شغّال على الموبايل واللاب (1.8s). جرّبه من الرابط، وبالتوفيق (4.2s)."
 await runScene('s12', async () => {
   await moveToSelector('.hero-card', 0.65);
-  await holdFor(1.2);
+  await holdFor(2.0);
+  await moveToSelector('.progress-card', 0.65);
 });
 
 // 13) الخاتمة (4.5 ثانية)
@@ -561,150 +600,16 @@ await holdFor(3.9);
 await context.close();
 await browser.close();
 
-// كتابة ملف frames.txt لـ ffmpeg concat demuxer
-const concatLines = [];
-for (const f of framesManifest) {
-  concatLines.push(`file '${f.file}'`);
-  concatLines.push(`duration ${f.duration.toFixed(6)}`);
-}
-// تكرار آخر فريم لضمان قراءة آخر مدة في concat demuxer
-const lastFrame = framesManifest[framesManifest.length - 1];
-concatLines.push(`file '${lastFrame.file}'`);
-
-const framesTxtPath = path.join(FRAMES_DIR, 'frames.txt');
-await fs.writeFile(framesTxtPath, concatLines.join('\n'), 'utf8');
-
-console.log(`✅ تم تصوير ${framesManifest.length} فريم بإجمالي مدة ${virtualElapsedSec.toFixed(2)} ثانية.`);
-
-// ============================================================================
-// البند 12: مكساج الصوت (التعليق الصوتي لكل مشهد بتأخير +0.3s + صوت الأذان في s8 بمستوى ~0.16 وتلاشي)
-// ============================================================================
-console.log('🎚️ جاري عمل مكساج الصوت (Voiceover + Adhan under s8 + loudnorm)...');
-
-const audioMixPath = path.join(WORK_DIR, 'audio_mix.m4a');
-const adhanMp3Path = path.join(ROOT, 'assets', 'adhan.mp3');
-
-const ffInputs = [];
-const filterParts = [];
-const mixLabels = [];
-
-// إدخال صمت بطول الفيديو بالكامل كقاعدة للمكساج
-ffInputs.push('-f', 'lavfi', '-t', virtualElapsedSec.toFixed(3), '-i', 'anullsrc=r=44100:cl=stereo');
-mixLabels.push('[0:a]');
-
-scriptData.scenes.forEach((sc, idx) => {
-  const wavPath = path.join(AUDIO_DIR, `${sc.id}.wav`);
-  ffInputs.push('-i', wavPath);
-  const inputIdx = idx + 1;
-  const delayMs = Math.round((sceneStartTimes[sc.id] + 0.3) * 1000);
-  const lbl = `[vo${inputIdx}]`;
-  filterParts.push(`[${inputIdx}:a]adelay=${delayMs}|${delayMs},volume=1.0${lbl}`);
-  mixLabels.push(lbl);
-});
-
-// إضافة صوت الأذان تحت مشهد s8 بصوت منخفض (~0.16) وتلاشي قبل المشهد التالي (s9)
-const adhanInputIdx = scriptData.scenes.length + 1;
-ffInputs.push('-i', adhanMp3Path);
-const s8Start = sceneStartTimes.s8;
-const s9Start = sceneStartTimes.s9;
-const s8Dur = Math.max(4, s9Start - s8Start - 0.4);
-const adhanDelayMs = Math.round(s8Start * 1000);
-const fadeOutStart = Math.max(1, s8Dur - 1.8).toFixed(2);
-filterParts.push(
-  `[${adhanInputIdx}:a]atrim=0:${s8Dur.toFixed(2)},afade=t=in:st=0:d=0.6,afade=t=out:st=${fadeOutStart}:d=1.6,volume=0.16,adelay=${adhanDelayMs}|${adhanDelayMs}[adhan]`
-);
-mixLabels.push('[adhan]');
-
-const totalInputs = mixLabels.length;
-filterParts.push(
-  `${mixLabels.join('')}amix=inputs=${totalInputs}:duration=first:dropout_transition=0:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=11[aout]`
-);
-
-const mixRes = spawnSync(
-  ffmpegPath,
-  [
-    '-y',
-    ...ffInputs,
-    '-filter_complex',
-    filterParts.join(';'),
-    '-map',
-    '[aout]',
-    '-c:a',
-    'aac',
-    '-b:a',
-    '192k',
-    '-ar',
-    '44100',
-    audioMixPath
-  ],
-  { stdio: 'inherit' }
-);
-if (mixRes.status !== 0) {
-  throw new Error('فشل مكساج الصوت في ffmpeg');
-}
-
-// ============================================================================
-// تجميع الفيديو من الفريمات (2560×1440 @ 60fps، libx264 -crf 19) ودمج الصوت
-// ============================================================================
-console.log('🎞️ جاري تجميع الفيديو النهائي (2560×1440 @ 60fps، H.264 CRF 19 + AAC 192k)...');
-
-const videoOnlyPath = path.join(WORK_DIR, 'video_only.mp4');
-const encRes = spawnSync(
-  ffmpegPath,
-  [
-    '-y',
-    '-f',
-    'concat',
-    '-safe',
-    '0',
-    '-i',
-    framesTxtPath,
-    '-vf',
-    'fps=60,scale=2560:1440:flags=lanczos,format=yuv420p',
-    '-r',
-    '60',
-    '-c:v',
-    'libx264',
-    '-preset',
-    'fast',
-    '-crf',
-    '19',
-    '-pix_fmt',
-    'yuv420p',
-    videoOnlyPath
-  ],
-  { stdio: 'inherit' }
-);
-if (encRes.status !== 0) {
-  throw new Error('فشل تشفير الفيديو في ffmpeg');
-}
-
-const muxRes = spawnSync(
-  ffmpegPath,
-  [
-    '-y',
-    '-i',
-    videoOnlyPath,
-    '-i',
-    audioMixPath,
-    '-c:v',
-    'copy',
-    '-c:a',
-    'copy',
-    '-shortest',
-    FINAL_MP4
-  ],
-  { stdio: 'inherit' }
-);
-if (muxRes.status !== 0) {
-  throw new Error('فشل دمج الصوت والفيديو في mukhattati-demo.mp4');
-}
-
-// حفظ التوقيتات لاستخراج فريمات الفحص البصري في البند 13
+// حفظ بيانات الفريمات والتوقيتات لتجميع الفيديو والصوت عبر mux-demo.py
 await fs.writeFile(
   path.join(WORK_DIR, 'scene_times.json'),
-  JSON.stringify({ sceneStartTimes, totalDuration: virtualElapsedSec }, null, 2),
+  JSON.stringify({ sceneStartTimes, totalDuration: virtualElapsedSec, framesManifest }, null, 2),
   'utf8'
 );
 
-console.log(`🎉 تم إنتاج الفيديو النهائي بنجاح: ${FINAL_MP4}`);
+console.log(`✅ تم تصوير ${framesManifest.length} فريم بإجمالي مدة ${virtualElapsedSec.toFixed(2)} ثانية.`);
+
+const muxRes = spawnSync(PYTHON_EXE, [path.join(__dirname, 'mux-demo.py')], { stdio: 'inherit' });
+if (muxRes.status !== 0) {
+  throw new Error('فشل تجميع الفيديو والصوت في mux-demo.py');
+}

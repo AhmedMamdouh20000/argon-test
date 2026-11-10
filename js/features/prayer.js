@@ -1,5 +1,5 @@
-// ميزة الصلاة (features/prayer.js): الحوار الإجباري عند الأذان + تبويب الصلاة وسجل الأيام السابقة
-import { html, render, isoDate, addDays, formatDateAr, formatTime12, timeToMinutes } from '../core/util.js';
+// ميزة الصلاة (features/prayer.js): الحوار الإجباري عند الأذان + تبويب الصلاة (كل يوم في يومه: الفروض الخمسة وقدام كل فرض حالته وأزراره)
+import { html, render, isoDate, addDays, dayNameAr, formatDateAr, formatTime12, timeToMinutes, parseLocalDate } from '../core/util.js';
 import { store } from '../core/store.js';
 import {
   EGYPT_CITIES,
@@ -12,6 +12,7 @@ import { sendBrowserNotification } from '../core/notify.js';
 import { showToast } from '../ui/ui.js';
 
 const triggeredPrayers = new Set();
+let selectedPrayerDate = null;
 
 export function checkPrayerTick(now = new Date()) {
   const todayStr = isoDate(now);
@@ -130,10 +131,13 @@ export function openMandatoryPrayerDialog(prayerMeta, dateStr, timeStr) {
 
 export function renderPrayerTab(container, { now = new Date() } = {}) {
   const todayStr = isoDate(now);
+  if (!selectedPrayerDate) selectedPrayerDate = todayStr;
+
   const nowMin = now.getHours() * 60 + now.getMinutes();
   const mainSetting = store.getRecord('setting', 'main') || {};
   const city = getCityById(mainSetting.city);
-  const times = computePrayerTimes(now, mainSetting);
+  const selectedDt = parseLocalDate(selectedPrayerDate);
+  const times = computePrayerTimes(selectedDt, mainSetting);
   const useOath = mainSetting.oath !== false;
 
   const prayersMap = {};
@@ -141,76 +145,125 @@ export function renderPrayerTab(container, { now = new Date() } = {}) {
     prayersMap[r.id] = r;
   }
 
-  // سجل آخر 7 أيام
-  const historyDays = [];
-  for (let i = 0; i < 7; i++) {
-    const dStr = addDays(todayStr, -i);
-    const items = PRAYERS_META.map((p) => {
-      const rec = prayersMap[`${dStr}:${p.key}`];
-      let st = rec?.s || 'upcoming';
-      if (!rec?.s) {
-        if (i > 0) st = 'missed';
-        else {
-          const pMin = timeToMinutes(times[p.key]);
-          if (nowMin > pMin) st = 'missed';
-        }
-      }
-      return { key: p.key, name: p.name, status: st };
+  // شريط اختيار اليوم (آخر 6 أيام + النهارده) عشان كل يوم يعرض صلواته الخمسة لوحده
+  const dayChips = [];
+  for (let i = 0; i >= -6; i--) {
+    const dStr = addDays(todayStr, i);
+    const dt = parseLocalDate(dStr);
+    // حساب لو اليوم ده كل صلواته اتصلت
+    const allPrayed = PRAYERS_META.every((p) => prayersMap[`${dStr}:${p.key}`]?.s === 'prayed');
+    dayChips.push({
+      date: dStr,
+      dayNum: dt.getDate(),
+      label: i === 0 ? 'النهارده' : i === -1 ? 'امبارح' : dayNameAr(dStr, true),
+      isActive: dStr === selectedPrayerDate,
+      allPrayed
     });
-    historyDays.push({ date: dStr, label: i === 0 ? 'النهارده' : formatDateAr(dStr), items });
   }
+
+  let prayedTodayCount = 0;
+
+  const rowsData = PRAYERS_META.map((p) => {
+    const tStr = times[p.key];
+    const pMin = timeToMinutes(tStr);
+    const recId = `${selectedPrayerDate}:${p.key}`;
+    const rec = prayersMap[recId];
+
+    let isPassed = false;
+    if (selectedPrayerDate < todayStr) {
+      isPassed = true;
+    } else if (selectedPrayerDate === todayStr) {
+      isPassed = nowMin > pMin;
+    }
+
+    let status = rec?.s || (isPassed ? 'missed' : 'upcoming');
+    // لو كانت مجرد called وعدى وقتها من غير تسجيل تعتبر فاتت/لسه
+    if (status === 'called') status = 'missed';
+    if (status === 'prayed') prayedTodayCount++;
+
+    return {
+      ...p,
+      tStr,
+      isPassed,
+      status
+    };
+  });
 
   render(
     container,
     html`
       <div class="masonry-grid">
-        <!-- مواقيت اليوم وحالة كل صلاة -->
+        <!-- صلوات اليوم المختار (كل يوم في يومه) -->
         <section class="card">
           <div class="card-head">
             <div>
-              <h2 class="sec-title">مواقيت الصلاة اليوم</h2>
-              <p class="muted-sub">📍 ${city.name} — الهيئة المصرية العامة للمساحة (شافعي)</p>
+              <h2 class="sec-title">
+                صلوات ${selectedPrayerDate === todayStr ? 'النهارده' : formatDateAr(selectedPrayerDate)}
+              </h2>
+              <p class="muted-sub">📍 ${city.name} — تمّت ${prayedTodayCount} من 5 فروض</p>
             </div>
             <button type="button" id="btn-test-adhan" class="btn btn-soft">🔊 جرّب الأذان</button>
           </div>
 
-          <ul class="prayer-list">
-            ${PRAYERS_META.map((p) => {
-              const tStr = times[p.key];
-              const pMin = timeToMinutes(tStr);
-              const recId = `${todayStr}:${p.key}`;
-              const rec = prayersMap[recId];
-              const passed = nowMin > pMin;
-              const status = rec?.s || (passed ? 'missed' : 'upcoming');
+          <!-- شريط أيام الأسبوع لاختيار اليوم وعرض صلواته في يومه -->
+          <nav class="date-strip prayer-day-strip" aria-label="اختر اليوم لعرض صلواته">
+            ${dayChips.map(
+              (d) => html`
+                <button
+                  type="button"
+                  class="date-chip ${d.isActive ? 'active' : ''}"
+                  data-pray-date="${d.date}"
+                >
+                  <span class="chip-name">${d.label}</span>
+                  <span class="chip-num">${d.dayNum}</span>
+                  ${d.allPrayed ? html`<span class="chip-dot ok-dot" title="تمت الصلوات الخمس"></span>` : ''}
+                </button>
+              `
+            )}
+          </nav>
 
-              let statusBadge = html`<span class="tag tag-muted">قادمة</span>`;
-              if (status === 'prayed') statusBadge = html`<span class="tag tag-ok">صليت ✓</span>`;
-              else if (status === 'promised') statusBadge = html`<span class="tag tag-warn">نويت أصلي</span>`;
-              else if (status === 'missed' || status === 'called') statusBadge = html`<span class="tag tag-rose">لسه</span>`;
+          <ul class="prayer-list mt-sm">
+            ${rowsData.map((p) => {
+              let statusBadge = html`<span class="tag tag-muted">لسه مأذنتش</span>`;
+              if (p.status === 'prayed') {
+                statusBadge = html`<span class="tag tag-ok">اتصلّت ✓</span>`;
+              } else if (p.status === 'promised') {
+                statusBadge = html`<span class="tag tag-warn">لسه (هصلّي)</span>`;
+              } else if (p.status === 'missed') {
+                statusBadge = html`<span class="tag tag-rose">فاتت</span>`;
+              }
 
               return html`
-                <li class="prayer-row status-${status}">
+                <li class="prayer-row status-${p.status}">
                   <div class="prayer-info">
                     <strong class="prayer-name">${p.name}</strong>
-                    <span class="prayer-clock">${formatTime12(tStr)}</span>
+                    <span class="prayer-clock">${formatTime12(p.tStr)}</span>
                     ${statusBadge}
                   </div>
                   <div class="prayer-btns">
                     <button
                       type="button"
-                      class="btn-sm ${status === 'prayed' ? 'active-ok' : ''}"
+                      class="btn-sm ${p.status === 'prayed' ? 'active-ok' : ''}"
                       data-pray-key="${p.key}"
                       data-pray-status="prayed"
                     >
-                      ${useOath ? 'والله صليت' : 'صليت ✓'}
+                      ${useOath ? 'والله صليت' : 'اتصلّت ✓'}
                     </button>
                     <button
                       type="button"
-                      class="btn-sm ${status === 'promised' ? 'active-warn' : ''}"
+                      class="btn-sm ${p.status === 'promised' ? 'active-warn' : ''}"
                       data-pray-key="${p.key}"
                       data-pray-status="promised"
                     >
-                      ${useOath ? 'والله هصلي' : 'هصلي'}
+                      لسه هصلي
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-sm ${p.status === 'missed' ? 'active-rose' : ''}"
+                      data-pray-key="${p.key}"
+                      data-pray-status="missed"
+                    >
+                      فاتت
                     </button>
                   </div>
                 </li>
@@ -219,13 +272,14 @@ export function renderPrayerTab(container, { now = new Date() } = {}) {
           </ul>
         </section>
 
-        <!-- إعداد الموقع والمدينة السريع + سجل الأيام السابقة -->
+        <!-- إعداد الموقع والمدينة السريع -->
         <section class="card">
           <div class="card-head">
             <h3 class="sec-title">المدينة والموقع</h3>
             <button type="button" id="btn-geo-prayer" class="btn-sm">📍 استخدم موقعي</button>
           </div>
-          <div class="field-row">
+          <p class="muted-sub">الحساب وفق الهيئة المصرية العامة للمساحة (المذهب الشافعي).</p>
+          <div class="field-row mt-sm">
             <div class="field-group">
               <label class="field-label" for="pray-city-select">المدينة</label>
               <select id="pray-city-select" class="input">
@@ -239,40 +293,18 @@ export function renderPrayerTab(container, { now = new Date() } = {}) {
               <input id="pray-adj-input" type="number" min="-30" max="30" class="input" value="${mainSetting.adj || 0}" />
             </div>
           </div>
-
-          <hr class="divider" />
-
-          <h3 class="sec-title">سجل الأيام السابقة</h3>
-          <div class="prayer-history">
-            ${historyDays.map(
-              (hd) => html`
-                <div class="history-row">
-                  <span class="history-date">${hd.label}</span>
-                  <div class="history-dots">
-                    ${hd.items.map((it) => {
-                      const lbl =
-                        it.status === 'prayed'
-                          ? 'صليت'
-                          : it.status === 'promised'
-                          ? 'وعدت'
-                          : it.status === 'missed'
-                          ? 'لسه'
-                          : 'قادمة';
-                      return html`
-                        <span class="h-pill st-${it.status}" title="${it.name}: ${lbl}">
-                          ${it.name}
-                        </span>
-                      `;
-                    })}
-                  </div>
-                </div>
-              `
-            )}
-          </div>
         </section>
       </div>
     `
   );
+
+  // اختيار اليوم من شريط الأيام لعرض صلواته في يومه
+  container.querySelectorAll('[data-pray-date]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      selectedPrayerDate = btn.dataset.prayDate;
+      renderPrayerTab(container, { now });
+    });
+  });
 
   container.querySelector('#btn-test-adhan')?.addEventListener('click', () => {
     openMandatoryPrayerDialog({ key: 'dhuhr', name: 'الظهر' }, todayStr, times.dhuhr);
@@ -282,8 +314,8 @@ export function renderPrayerTab(container, { now = new Date() } = {}) {
     btn.addEventListener('click', () => {
       const k = btn.dataset.prayKey;
       const st = btn.dataset.prayStatus;
-      store.patch('prayer', `${todayStr}:${k}`, {
-        date: todayStr,
+      store.patch('prayer', `${selectedPrayerDate}:${k}`, {
+        date: selectedPrayerDate,
         k,
         s: st,
         t: times[k],

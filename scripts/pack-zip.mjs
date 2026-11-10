@@ -31,9 +31,7 @@ const DEPLOY_ITEMS = [
   'assets',
   'icons',
   'supabase',
-  'scripts/check-shared.mjs',
-  'tests/unit.mjs',
-  'tests/e2e.js'
+  'scripts/check-shared.mjs'
 ];
 
 for (const item of DEPLOY_ITEMS) {
